@@ -12,6 +12,10 @@
 #define BAUD  115200
 #define BAUD_PRESCALE ((F_CPU / (BAUD * 8UL)) - 1)
 
+#define clockCyclesPerMicrosecond() (F_CPU / 1000000L)
+#define clockCyclesToMicroseconds(a) ((a) / clockCyclesPerMicrosecond())
+#define microsecondsToClockCycles(a) ((a) * clockCyclesPerMicrosecond())
+
 #define OFF_SIG ((uint32_t*) 0)
 #define OFF_LEN ((uint8_t*)  6)
 #define OFF_TXT ((uint8_t*)  7)
@@ -83,7 +87,7 @@ void EEPROM_init(char* signature) {
 }
 
 // ==============================================================
-// ========================= SENSOR =============================
+// ======================= DIST SENSOR ==========================
 // ==============================================================
 
 void dist_sensor_init() {
@@ -91,46 +95,49 @@ void dist_sensor_init() {
 	DDRB &= ~bit_value(DDB4);
 }
 
-void sensor_init() {
-	dist_sensor_init();
-}
-
 void begin_trig() {
 	PORTB &= ~bit_value(PORTB3);
-	_delay_ms(0.005);
+	_delay_us(5);
 	PORTB |= bit_value(PORTB3);
-	_delay_ms(0.010);
+	_delay_us(10);
 	PORTB &= ~bit_value(PORTB3);
 }
 
 unsigned long pulseIn(uint8_t state, unsigned long timeout) {
-	uint8_t bit = bit_value(4);
+	uint8_t bit = bit_value(PORTB4);
 	uint8_t stateMask = (state ? bit : 0);
 	
 	unsigned long width = 0;
 	unsigned long numloops = 0;
+	
+	// convert the timeout from microseconds to a number of times through
+	// the initial loop; it takes 16 clock cycles per iteration
+	unsigned long maxloops = microsecondsToClockCycles(timeout) / 16;
 
 	// wait for any previous pulse to end
 	while ((PINB & bit) == stateMask)
-		if (numloops++ == timeout)
+		if (numloops++ == maxloops)
 			return 0;
 	
 	// wait for the pulse to start
 	while ((PINB & bit) != stateMask)
-		if (numloops++ == timeout)
+		if (numloops++ == maxloops)
 			return 0;
 
 	// wait for the pulse to stop
 	while ((PINB & bit) == stateMask) {
-		if (numloops++ == timeout)
+		if (numloops++ == maxloops)
 			return 0;
 		width++;
 	}
 
-	return width + 1;
+	// convert the reading to microseconds. The loop has been determined
+	// to be 20 clock cycles long and have about 16 clocks between the edge
+	// and the start of the loop
+	return clockCyclesToMicroseconds(width * 16 + 16);
 }
 
-void myPrintf(float f_val) {
+void dist_printf(float f_val) {
 	int i_val = (int) (f_val * 10.0);
 	printf("Distanza: %d.%d cm\n", i_val / 10, i_val % 10);
 }
@@ -142,7 +149,120 @@ void dist_sensor_active() {
 		unsigned long duration = pulseIn(HIGH, 10000);
 		float cm = (duration/2) / 29.1;
 		
-		myPrintf(cm);		
+		dist_printf(cm);		
+		_delay_ms(500);
+	}
+}
+
+// ==============================================================
+// ======================= ANALOG SENSOR ========================
+// ==============================================================
+
+void analog_init() {
+	ADMUX = 0x00;
+	ADCSRA = 0x00;
+	ADCSRB = 0x00;
+	
+	ADMUX  |= bit_value(REFS0) | bit_value(MUX3)  | bit_value(MUX2)  | bit_value(MUX1)  | bit_value(MUX0);
+	ADCSRA |= bit_value(ADEN)  | bit_value(ADPS2) | bit_value(ADPS1) | bit_value(ADPS0) | bit_value(ADSC);
+	loop_until_bit_is_clear(ADCSRA, ADSC);
+}
+
+void analog_sensor_init() {
+	DDRC  &= ~bit_value(0);
+	PORTC &= ~bit_value(0);
+	DIDR0 |= bit_value(0);
+}
+
+uint16_t analog_read(uint8_t pin) {
+	ADMUX = (ADMUX & 0xf0) | (pin & 0x0f);
+
+	ADCSRA |= bit_value(ADSC);
+	loop_until_bit_is_clear(ADCSRA, ADSC);
+
+	uint8_t lb = ADCL;
+	uint8_t hb = ADCH;
+
+	return (((uint16_t) hb) << 8) | lb;
+}
+
+void analog_printf(uint16_t val) {
+	if (0 <= val && val < 100)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 200)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 300)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 400)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 500)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 600)	printf("Il sensore è alla profondità di x mm\n");
+	if (0 <= val && val < 750)	printf("Il sensore è alla profondità di x mm\n");
+}
+
+void analog_sensor_active() {
+	for(int i = 0; i < 30; i++) {
+		uint16_t raw = analog_read(0);
+		printf("Voltage: %hu\n", raw);
+		
+		analog_printf(raw);
+		_delay_ms(500);
+	}
+}
+
+// ==============================================================
+// ======================= TEMP SENSOR ==========================
+// ==============================================================
+
+void temp_request(bit) {
+	DDRD |= bit;
+	
+	PORTD &= ~bit;
+	_delay_ms(20);
+	
+	PORTD |= bit;
+}
+
+void temp_response(bit) {
+	DDRD &= ~bit;
+
+	while (PIND & bit);
+	while (!(PIND & bit));
+	while (PIND & bit);
+}
+
+uint8_t temp_data(bit) {
+	uint8_t c = 0;
+	
+	for(int i = 0; i < 8; i++) {
+		while (!(PIND & bit));
+		_delay_us(30);
+		
+		if(PIND & bit)	c = (c << 1) | HIGH;
+		else 			c = (c << 1);
+		
+		while (PIND & bit);
+	}
+	
+	return c;
+}
+
+void temp_sensor_active() {
+	uint8_t I_H, D_H, I_T, D_T, checksum;
+	
+	for(int i = 0; i < 30; i++) {
+		temp_request();
+		temp_response();
+		
+		I_H = temp_data();
+		D_H = temp_data();
+		I_T = temp_data();
+		D_T = temp_data();
+		checksum = temp_data();
+		
+		if ((I_H + D_H + I_T + D_T) != checksum)
+			printf("Error");
+		else {
+			printf("H: %u.%u %%\n", I_H, D_H);
+			printf("T: %u.%u °C\n", I_T, D_T);
+		}
+		
 		_delay_ms(500);
 	}
 }
@@ -150,6 +270,12 @@ void dist_sensor_active() {
 // ==============================================================
 // ========================== MAIN ==============================
 // ==============================================================
+
+void sensor_init() {
+	dist_sensor_init();
+	analog_init();
+	analog_sensor_init();
+}
 
 int main() {
 	char* signature = "Matteo";
@@ -201,6 +327,8 @@ int main() {
 			case 'A':
 			case 'a':
 				dist_sensor_active();
+				analog_sensor_active();
+				temp_sensor_active();
 				break;
 			
 			default:
