@@ -174,8 +174,8 @@ void analog_sensor_init() {
 	DIDR0 |= bit_value(0);
 }
 
-uint16_t analog_read(uint8_t pin) {
-	ADMUX = (ADMUX & 0xf0) | (pin & 0x0f);
+uint16_t analog_read() {
+	ADMUX = (ADMUX & 0xf0) | (0 & 0x0f);
 
 	ADCSRA |= bit_value(ADSC);
 	loop_until_bit_is_clear(ADCSRA, ADSC);
@@ -198,7 +198,7 @@ void analog_printf(uint16_t val) {
 
 void analog_sensor_active() {
 	for(int i = 0; i < 30; i++) {
-		uint16_t raw = analog_read(0);
+		uint16_t raw = analog_read();
 		printf("Voltage: %hu\n", raw);
 		
 		analog_printf(raw);
@@ -245,16 +245,17 @@ uint8_t temp_data(bit) {
 
 void temp_sensor_active() {
 	uint8_t I_H, D_H, I_T, D_T, checksum;
+	uint8_t bit = bit_value(6); 
 	
 	for(int i = 0; i < 30; i++) {
-		temp_request();
-		temp_response();
+		temp_request(bit);
+		temp_response(bit);
 		
-		I_H = temp_data();
-		D_H = temp_data();
-		I_T = temp_data();
-		D_T = temp_data();
-		checksum = temp_data();
+		I_H = temp_data(bit);
+		D_H = temp_data(bit);
+		I_T = temp_data(bit);
+		D_T = temp_data(bit);
+		checksum = temp_data(bit);
 		
 		if ((I_H + D_H + I_T + D_T) != checksum)
 			printf("Error");
