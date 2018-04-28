@@ -210,7 +210,7 @@ void analog_sensor_active() {
 // ======================= TEMP SENSOR ==========================
 // ==============================================================
 
-void temp_request(bit) {
+void temp_request(uint8_t bit) {
 	DDRD |= bit;
 	
 	PORTD &= ~bit;
@@ -219,7 +219,7 @@ void temp_request(bit) {
 	PORTD |= bit;
 }
 
-void temp_response(bit) {
+void temp_response(uint8_t bit) {
 	DDRD &= ~bit;
 
 	while (PIND & bit);
@@ -227,7 +227,7 @@ void temp_response(bit) {
 	while (PIND & bit);
 }
 
-uint8_t temp_data(bit) {
+uint8_t temp_data(uint8_t bit) {
 	uint8_t c = 0;
 	
 	for(int i = 0; i < 8; i++) {
