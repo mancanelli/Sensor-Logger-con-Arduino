@@ -52,6 +52,7 @@ static int USART_receive(FILE *f) {
 }
 
 static int USART_send(char c, FILE *f) {
+	//if(c == '\n') USART_send('\r', f);
 	while (!(UCSR0A & bit_value(UDRE0))) {}
 	UDR0 = c;
 	return 0;
