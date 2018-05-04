@@ -16,12 +16,7 @@
 #define clockCyclesToMicroseconds(a) ((a) / clockCyclesPerMicrosecond())
 #define microsecondsToClockCycles(a) ((a) * clockCyclesPerMicrosecond())
 
-#define OFF_SIG ((uint32_t*) 0)
-#define OFF_LEN ((uint8_t*)  6)
-#define OFF_TXT ((uint8_t*)  7)
-
 #define bit_value(bit) (1 << (bit))
-#define SIG_LEN 6
 
 #define HIGH 0x1
 #define LOW  0x0
@@ -52,7 +47,7 @@ static int USART_receive(FILE *f) {
 }
 
 static int USART_send(char c, FILE *f) {
-	//if(c == '\n') USART_send('\r', f);
+	if(c == '\n') USART_send('\r', f);
 	while (!(UCSR0A & bit_value(UDRE0))) {}
 	UDR0 = c;
 	return 0;
@@ -62,10 +57,8 @@ static int USART_send(char c, FILE *f) {
 // ========================= EEPROM =============================
 // ==============================================================
 
-//# define cli()  __asm__ __volatile__ ("cli" ::: "memory")
-
-void EEPROM_init(char* signature) {
-	char buffer[SIG_LEN];
+int EEPROM_init() {
+	char buffer;
 	//cli();
 	
 	if(!eeprom_is_ready()) {
@@ -74,17 +67,11 @@ void EEPROM_init(char* signature) {
 	}
 	printf("EEPROM ready\n");
 	
-	printf("Checking EEPROM format...\n");
-	eeprom_read_block(&buffer, OFF_SIG, SIG_LEN);
-	if (memcmp(buffer, signature, SIG_LEN) == 0)
-		printf("EEPROM already formatted\n");
-	else {
-		printf("EEPROM is blank, formatting...\n");
-		eeprom_write_block(signature, OFF_SIG, SIG_LEN);
-		eeprom_write_byte(OFF_LEN, (int8_t) 0);
-		eeprom_write_byte(OFF_TXT, (int8_t) 0);
-		printf("EEPROM formatted\n");
-	}
+	printf("Checking EEPROM...\n");
+	int eeprom_empty = eeprom_read_byte(0) ? 0 : 1;
+	if (eeprom_empty)
+		printf("EEPROM empty\n");
+	return eeprom_empty;
 }
 
 // ==============================================================
@@ -143,16 +130,26 @@ void dist_printf(float f_val) {
 	printf("Distanza: %d.%d cm\n", i_val / 10, i_val % 10);
 }
 
-void dist_sensor_active() {
+void dist_sensor_active(char* str) {
+	char res[8];
+	float max = 0.0;
+	
 	for(int i = 0; i < 30; i++) {
 		begin_trig();
 		
 		unsigned long duration = pulseIn(HIGH, 10000);
 		float cm = (duration/2) / 29.1;
 		
-		dist_printf(cm);		
+		max = (cm > max) ? cm : max;
+		
+		dist_printf(cm);
 		_delay_ms(500);
 	}
+	
+	sprintf(res, "%f", max);
+	strcpy(str, "Distanza: ");
+	strcat(str, res);
+	strcat(str, " cm");
 }
 
 // ==============================================================
@@ -187,22 +184,37 @@ uint16_t analog_read() {
 	return (((uint16_t) hb) << 8) | lb;
 }
 
-void analog_printf(uint16_t val) {
-	if (0 <= val && val < 100)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 200)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 300)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 400)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 500)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 600)	printf("Il sensore è alla profondità di x mm\n");
-	if (0 <= val && val < 750)	printf("Il sensore è alla profondità di x mm\n");
+void analog_printf(uint16_t val, char* str) {
+	if(0 <= val && val < 130) {
+		strcpy(str, "Profondità: 0.0-0.5 cm");
+		printf("%s\n", str);
+	}
+	if(130 <= val && val < 260)	{
+		strcpy(str, "Profondità: 0.5-1.0 cm");
+		printf("%s\n", str);
+	}
+	if(260 <= val && val < 320)	{
+		strcpy(str, "Profondità: 1.0-2.0 cm");
+		printf("%s\n", str);
+	}
+	if(320 <= val && val < 390)	{
+		strcpy(str, "Profondità: 2.0-3.0 cm");
+		printf("%s\n", str);
+	}
+	if(390 <= val && val < 460)	{
+		strcpy(str, "Profondità: 3.0-4.0 cm");
+		printf("%s\n", str);
+	}
+	if(val >= 460)	{
+		strcpy(str, "Profondità: >4.0 cm");
+		printf("%s\n", str);
+	}
 }
 
-void analog_sensor_active() {
+void analog_sensor_active(char* str) {
 	for(int i = 0; i < 30; i++) {
 		uint16_t raw = analog_read();
-		printf("Voltage: %hu\n", raw);
-		
-		analog_printf(raw);
+		analog_printf(raw, str);
 		_delay_ms(500);
 	}
 }
@@ -222,7 +234,6 @@ void temp_request(uint8_t bit) {
 
 void temp_response(uint8_t bit) {
 	DDRD &= ~bit;
-
 	while (PIND & bit);
 	while (!(PIND & bit));
 	while (PIND & bit);
@@ -244,29 +255,39 @@ uint8_t temp_data(uint8_t bit) {
 	return c;
 }
 
-void temp_sensor_active() {
-	uint8_t I_H, D_H, I_T, D_T, checksum;
+void temp_sensor_active(char* str) {
+	char res1[8];
+	char res2[8];
+	
+	float hum, temp, checksum;
+	float max_t, max_h;
+	
 	uint8_t bit = bit_value(6); 
 	
 	for(int i = 0; i < 30; i++) {
 		temp_request(bit);
 		temp_response(bit);
 		
-		I_H = temp_data(bit);
-		D_H = temp_data(bit);
-		I_T = temp_data(bit);
-		D_T = temp_data(bit);
-		checksum = temp_data(bit);
+		hum = (float) temp_data(bit) + ((float) temp_data(bit)) / 100;
+		temp = (float) temp_data(bit) + ((float) temp_data(bit)) / 100;
+		checksum = (float) temp_data(bit);
 		
-		if ((I_H + D_H + I_T + D_T) != checksum)
-			printf("Error");
-		else {
-			printf("H: %u.%u %%\n", I_H, D_H);
-			printf("T: %u.%u °C\n", I_T, D_T);
-		}
+		printf("H: %f %%\n", hum);
+		printf("T: %f °C\n", temp);
+		
+		max_t = (temp > max_t) ? temp : max_t;
+		max_h = (hum  > max_h) ? hum  : max_h;
 		
 		_delay_ms(500);
 	}
+	
+	sprintf(res1, "%f", temp);
+	sprintf(res2, "%f", hum);
+	strcpy(str, "Temperatura: ");
+	strcat(str, res1);
+	strcat(str, " °C\nUmidità: ");
+	strcat(str, res2);
+	strcat(str, " %%");
 }
 
 // ==============================================================
@@ -280,57 +301,73 @@ void sensor_init() {
 }
 
 int main() {
-	char* signature = "Matteo";
-	char buffer[64];
-	uint8_t str_length;
+	char res1[32], res2[32], res3[32];
+	int len1, len2, len3;
 	
 	USART_init();
 	stdout = &OUTFP;
 	stdin  = &INFP;
 	
-	EEPROM_init(signature);
+	int eeprom_empty = EEPROM_init();
 	sensor_init();
 	
 	while(1) {
-		//printf("[A]ctivate sensor, [R]ead memory, [W]rite memory, [E]rase memory: ");
 		printf("Mode: ");
 		char mode = USART_receive(&INFP);
 		printf("%c\n", mode);
 		
 		switch(mode) {
-			case 'W':
-			case 'w':
-				printf("Enter a string to store in EEPROM: ");
-				scanf("%s", buffer);
-				str_length = strlen(buffer);
-				printf("EEPROM written\n");
-				
-				eeprom_write_byte(OFF_LEN, str_length);
-				eeprom_write_block(&buffer, OFF_TXT, str_length + 1);
-				break;
-			
 			case 'R':
 			case 'r':
-				str_length = eeprom_read_byte(OFF_LEN);
-				eeprom_read_block(&buffer, OFF_TXT, str_length + 1);
+				if(eeprom_empty) {
+					printf("EEPROM empty!\n");
+					break;
+				}
 				
-				printf("Contents of string in EEPROM: %s\n", buffer);
+				len1 = eeprom_read_byte((uint8_t*) 0);
+				eeprom_read_block(&res1, (uint8_t*) 1, len1);
+				
+				len2 = eeprom_read_byte((uint8_t*) len1+1);
+				eeprom_read_block(&res2, (uint8_t*) len1+2, len1+len2+1);
+				
+				len3 = eeprom_read_byte((uint8_t*) len1+len2+2);
+				eeprom_read_block(&res3, (uint8_t*) len1+len2+3, len1+len2+len3+2);
+				
+				printf("Contents of string in EEPROM:\n");
+				printf("\t %s\n", res1);
+				printf("\t %s\n", res2);
+				printf("\t %s\n", res3);
 				break;
-				
+			/*
 			case 'E':
 			case 'e':
-				//eeprom_write_dword(OFF_SIG, 0x0000);
-				eeprom_write_byte(OFF_LEN, (int8_t) 0);
-				eeprom_write_byte(OFF_TXT, (int8_t) 0);
-				
+				eeprom_write_dword(0,  0x0000);
 				printf("EEPROM erased\n");
 				break;
-				
+			*/
 			case 'A':
 			case 'a':
-				dist_sensor_active();
-				analog_sensor_active();
-				temp_sensor_active();
+				dist_sensor_active(res1);
+				analog_sensor_active(res2);
+				temp_sensor_active(res3);
+				
+				len1 = strlen(res1) + 1;
+				len2 = strlen(res2) + 1;
+				len3 = strlen(res3) + 1;
+				
+				printf("Store results in EEPROM\n");
+				
+				eeprom_write_byte((uint8_t*) 0, len1);
+				eeprom_write_block(&res1, (uint8_t*) 1, len1);
+				
+				eeprom_write_byte((uint8_t*) len1+1, len2);
+				eeprom_write_block(&res2, (uint8_t*) len1+2, len2);
+				
+				eeprom_write_byte((uint8_t*) len1+len2+2, len3);
+				eeprom_write_block(&res3, (uint8_t*) len1+len2+3, len3);		
+				
+				printf("EEPROM written\n");
+				eeprom_empty = 0;
 				break;
 			
 			default:
