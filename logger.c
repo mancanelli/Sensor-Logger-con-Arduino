@@ -28,6 +28,21 @@
 // ========================= STRUCT =============================
 // ==============================================================
 
+typedef enum {
+	GetDist = 0x1,
+	GetWater = 0x2,
+	GetTemp = 0x3,
+	GetAll = 0x4
+} StructType;
+
+typedef enum {
+	DistFloat = 0x1,
+	WaterFrom = 0x2,
+	WaterTo = 0x3,
+	TempFloat = 0x4,
+	HumFloat = 0x5
+} FloatType;
+
 typedef struct DistSensor {
 	char* desc;
 	float data;
@@ -49,21 +64,6 @@ typedef struct TempSensor {
 	float hum_data;
 	uint8_t digital_bit;
 } TempSensor;
-
-typedef enum {
-	GetDist = 0x1,
-	GetWater = 0x2,
-	GetTemp = 0x3,
-	GetAll = 0x4
-} StructType;
-
-typedef enum {
-	DistFloat = 0x1,
-	WaterFrom = 0x2,
-	WaterTo = 0x3,
-	TempFloat = 0x4,
-	HumFloat = 0x5
-} FloatType;
 
 typedef struct LogStruct {
 	DistSensor* ds;
@@ -118,7 +118,7 @@ void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor*
 	
 	buffer->data = malloc(4);
 	buffer->size = 4;
-    buffer->next = 0;
+	buffer->next = 0;
 }
 
 void reset_buffer(Buffer* b) {
@@ -135,10 +135,10 @@ void reserve_space(Buffer* buffer, int bytes) {
 
 void serialize_string(char* str, Buffer* b) {
 	int len = strlen(str);
-    reserve_space(b, len+2);
-    memcpy(((char*) b->data) + b->next, str, len);
-    memcpy(((char*) b->data) + b->next + len, ": ", 2);
-    b->next += len+2;
+	reserve_space(b, len+2);
+	memcpy(((char*) b->data) + b->next, str, len);
+	memcpy(((char*) b->data) + b->next + len, ": ", 2);
+	b->next += len+2;
 }
 
 void serialize_float(float x, FloatType float_type, Buffer* b) {
@@ -146,10 +146,10 @@ void serialize_float(float x, FloatType float_type, Buffer* b) {
 	dtostrf(x, 4, 2, str);
 	
 	int len = strlen(str);
-    reserve_space(b, len+5);
-    memcpy(((char*) b->data) + b->next, str, len);
-    
-    switch(float_type) {
+	reserve_space(b, len+5);
+	memcpy(((char*) b->data) + b->next, str, len);
+	
+	switch(float_type) {
 		case DistFloat:
 		case WaterTo:
 			memcpy(((char*) b->data) + b->next + len, " cm\n", 4);
@@ -499,8 +499,8 @@ void temp_sensor_active() {
 	temp_sensor->temp_data = temp;
 	temp_sensor->hum_data = hum;
 	
-//	printf("T: %u °C\n", (uint32_t) temp);
-//	printf("H: %u %%\n", (uint32_t) hum);
+	//printf("T: %u °C\n", (uint32_t) temp);
+	//printf("H: %u %%\n", (uint32_t) hum);
 	
 	_delay_ms(500);
 	
@@ -604,11 +604,11 @@ ISR(USART_RX_vect) {
 }
 
 int main() {
-	dist_sensor  = (DistSensor*)  malloc(sizeof(DistSensor));
+	dist_sensor = (DistSensor*) malloc(sizeof(DistSensor));
 	water_sensor = (WaterSensor*) malloc(sizeof(WaterSensor));
-	temp_sensor  = (TempSensor*)  malloc(sizeof(TempSensor));
-	log_struct   = (LogStruct*)   malloc(sizeof(LogStruct));
-	buffer		 = (Buffer*)	  malloc(sizeof(Buffer));
+	temp_sensor = (TempSensor*) malloc(sizeof(TempSensor));
+	log_struct = (LogStruct*) malloc(sizeof(LogStruct));
+	buffer = (Buffer*) malloc(sizeof(Buffer));
 	
 	UART_init();
 	stdout = &OUTFP;
