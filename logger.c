@@ -11,11 +11,11 @@
 // ========================= STRUCT =============================
 // ==============================================================
 
-DistSensor*  dist_sensor;
+DistSensor* dist_sensor;
 WaterSensor* water_sensor;
-TempSensor*  temp_sensor;
-LogStruct*   log_struct;
-Buffer* 	 buffer;
+TempSensor* temp_sensor;
+LogStruct* log_struct;
+Buffer* buffer;
 
 void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor* temp_sensor, LogStruct* log_struct, Buffer* buffer) {
 	dist_sensor->desc  = (char*) malloc(16);
@@ -379,8 +379,8 @@ uint8_t temp_data() {
 		while (!(PIND & bit));
 		_delay_us(30);
 		
-		if(PIND & bit)	c = (c << 1) | HIGH;
-		else 			c = (c << 1);
+		if(PIND & bit) c = (c << 1) | HIGH;
+		else c = (c << 1);
 		
 		while (PIND & bit);
 	}
