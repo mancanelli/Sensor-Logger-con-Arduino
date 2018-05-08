@@ -5,80 +5,11 @@
 #include <avr/eeprom.h>
 #include <avr/interrupt.h>
 
-//#include "logger.h"
-
-// ==============================================================
-// ======================== SETTING =============================
-// ==============================================================
-
-#define F_CFU 16000000
-#define BAUD  115200
-#define BAUD_PRESCALE ((F_CPU / (BAUD * 8UL)) - 1)
-
-#define clockCyclesPerMicrosecond() (F_CPU / 1000000L)
-#define clockCyclesToMicroseconds(a) ((a) / clockCyclesPerMicrosecond())
-#define microsecondsToClockCycles(a) ((a) * clockCyclesPerMicrosecond())
-
-#define bit_value(bit) (1 << (bit))
-
-#define HIGH 0x1
-#define LOW  0x0
+#include "logger.h"
 
 // ==============================================================
 // ========================= STRUCT =============================
 // ==============================================================
-
-typedef struct DistSensor {
-	char* desc;
-	float data;
-	uint8_t trig_bit;
-	uint8_t echo_bit;
-} DistSensor;
-
-typedef struct WaterSensor {
-	char* desc;
-	float from;
-	float to;
-	uint8_t analog_bit;
-} WaterSensor;
-
-typedef struct TempSensor {
-	char* temp_desc;
-	char* hum_desc;
-	float temp_data;
-	float hum_data;
-	uint8_t digital_bit;
-} TempSensor;
-
-typedef enum {
-	GetDist = 0x1,
-	GetWater = 0x2,
-	GetTemp = 0x3,
-	GetAll = 0x4
-} StructType;
-
-typedef enum {
-	DistFloat = 0x1,
-	WaterFrom = 0x2,
-	WaterTo = 0x3,
-	TempFloat = 0x4,
-	HumFloat = 0x5
-} FloatType;
-
-typedef struct LogStruct {
-	DistSensor* ds;
-	WaterSensor* ws;
-	TempSensor* ts;
-	int write_count;
-	int read_count;
-	StructType type;
-} LogStruct;
-
-typedef struct Buffer {
-    void* data;
-    int next;
-    int size;
-} Buffer;
 
 DistSensor*  dist_sensor;
 WaterSensor* water_sensor;
@@ -118,7 +49,7 @@ void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor*
 	
 	buffer->data = malloc(4);
 	buffer->size = 4;
-    buffer->next = 0;
+	buffer->next = 0;
 }
 
 void reset_buffer(Buffer* b) {
@@ -135,10 +66,10 @@ void reserve_space(Buffer* buffer, int bytes) {
 
 void serialize_string(char* str, Buffer* b) {
 	int len = strlen(str);
-    reserve_space(b, len+2);
-    memcpy(((char*) b->data) + b->next, str, len);
-    memcpy(((char*) b->data) + b->next + len, ": ", 2);
-    b->next += len+2;
+	reserve_space(b, len+2);
+	memcpy(((char*) b->data) + b->next, str, len);
+	memcpy(((char*) b->data) + b->next + len, ": ", 2);
+	b->next += len+2;
 }
 
 void serialize_float(float x, FloatType float_type, Buffer* b) {
@@ -146,10 +77,10 @@ void serialize_float(float x, FloatType float_type, Buffer* b) {
 	dtostrf(x, 4, 2, str);
 	
 	int len = strlen(str);
-    reserve_space(b, len+5);
-    memcpy(((char*) b->data) + b->next, str, len);
+	reserve_space(b, len+5);
+	memcpy(((char*) b->data) + b->next, str, len);
     
-    switch(float_type) {
+	switch(float_type) {
 		case DistFloat:
 		case WaterTo:
 			memcpy(((char*) b->data) + b->next + len, " cm\n", 4);
@@ -208,7 +139,7 @@ void packet_serialize(LogStruct* ls, Buffer* b) {
 			break;
 		
 		default:
-			printf("Invalid operation!\n");
+			printf("Operazione non valida!\n");
 			break;			
 	}
 }
@@ -218,8 +149,8 @@ void packet_serialize(LogStruct* ls, Buffer* b) {
 // ==============================================================
 
 void UART_init() {
-	UBRR0H = (BAUD_PRESCALE >> 8);
-	UBRR0L = BAUD_PRESCALE;
+	UBRR0H = (UBRR0_SET >> 8);
+	UBRR0L = UBRR0_SET;
 	
 	UCSR0A |= bit_value(U2X0);
 	UCSR0B |= bit_value(RXCIE0);
@@ -247,7 +178,7 @@ static FILE INFP  = FDEV_SETUP_STREAM(NULL, UART_receive, _FDEV_SETUP_READ);
 // ========================= EEPROM =============================
 // ==============================================================
 
-void EEPROM_read(char* str, int offset, int size){
+void EEPROM_read(char* str, int offset, int size) {
 	uint8_t* start = (uint8_t*) offset;
 	uint8_t* end = (uint8_t*) (offset + size);
 	while(start < end) {
@@ -289,17 +220,17 @@ void EEPROM_init() {
 	cli();
 	
 	if(!eeprom_is_ready()) {
-		printf("Waiting for EEPROM to become ready...\n");
+		printf("EEPROM non ancora pronta...\n");
 		eeprom_busy_wait();
 	}
-	printf("EEPROM ready\n");
+	printf("EEPROM pronta\n");
 	
-	printf("Checking EEPROM...\n");
+	printf("Controllo del contenuto della EEPROM...\n");
 	EEPROM_read_int(&data, 0);
 	int eeprom_empty = !data;
 	
 	if(eeprom_empty)
-		printf("EEPROM empty\n");
+		printf("EEPROM vuota\n");
 }
 
 // ==============================================================
@@ -319,34 +250,28 @@ void begin_trig() {
 	PORTB &= ~bit_value(dist_sensor->trig_bit);
 }
 
-unsigned long pulseIn(uint8_t state, unsigned long timeout) {
+int pulseIn(uint8_t state, int timeout) {
 	uint8_t bit = bit_value(dist_sensor->echo_bit);
-	uint8_t stateMask = (state ? bit : 0);
+	uint8_t cmp = (state ? bit : 0);
 	
-	unsigned long width = 0;
-	unsigned long numloops = 0;
-	unsigned long maxloops = microsecondsToClockCycles(timeout) / 16;
+	int res = 0;
+	int cnt = 0;
 
-	while ((PINB & bit) == stateMask)
-		if (numloops++ == maxloops)
+	while ((PINB & bit) == cmp)
+		if (cnt++ == timeout)
 			return 0;
 	
-	while ((PINB & bit) != stateMask)
-		if (numloops++ == maxloops)
+	while ((PINB & bit) != cmp)
+		if (cnt++ == timeout)
 			return 0;
 
-	while ((PINB & bit) == stateMask) {
-		if (numloops++ == maxloops)
+	while ((PINB & bit) == cmp) {
+		if (cnt++ == timeout)
 			return 0;
-		width++;
+		res++;
 	}
 
-	return clockCyclesToMicroseconds(width * 16 + 16);
-}
-
-void dist_printf(float f_val) {
-	int i_val = (int) (f_val * 10.0);
-	printf("Distanza: %d.%d cm\n", i_val / 10, i_val % 10);
+	return res + 1;
 }
 
 void dist_sensor_active() {
@@ -354,20 +279,12 @@ void dist_sensor_active() {
 
 	begin_trig();
 	
-	unsigned long duration = pulseIn(HIGH, 10000);
+	int duration = pulseIn(HIGH, 10000);
 	float cm = (duration/2) / 29.1;
 	
-	//dist_printf(cm);
 	dist_sensor->data = cm;
 	
 	_delay_ms(500);
-	
-	/*
-	dtostrf(cm, 4, 2, res);
-	strcpy(str, "Distanza: ");
-	strcat(str, res);
-	strcat(str, " cm");
-	*/
 }
 
 // ==============================================================
@@ -406,38 +323,26 @@ uint16_t analog_read() {
 void analog_sensor_active() {
 	uint16_t val = analog_read();
 	if(0 <= val && val < 130) {
-		//strcpy(str, "Profondità: 0.0-0.5 cm");
-		//printf("%s\n", str);
 		water_sensor->from = 0.0;
 		water_sensor->to = 0.5;
 	}
 	if(130 <= val && val < 260)	{
-		//strcpy(str, "Profondità: 0.5-1.0 cm");
-		//printf("%s\n", str);
 		water_sensor->from = 0.5;
 		water_sensor->to = 1.0;
 	}
 	if(260 <= val && val < 320)	{
-		//strcpy(str, "Profondità: 1.0-2.0 cm");
-		//printf("%s\n", str);
 		water_sensor->from = 1.0;
 		water_sensor->to = 2.0;
 	}
 	if(320 <= val && val < 390)	{
-		//strcpy(str, "Profondità: 2.0-3.0 cm");
-		//printf("%s\n", str);
 		water_sensor->from = 2.0;
 		water_sensor->to = 3.0;
 	}
 	if(390 <= val && val < 460)	{
-		//strcpy(str, "Profondità: 3.0-4.0 cm");
-		//printf("%s\n", str);
 		water_sensor->from = 3.0;
 		water_sensor->to = 4.0;
 	}
-	if(val >= 460)	{
-		//strcpy(str, "Profondità: >4.0 cm");
-		//printf("%s\n", str);
+	if(val >= 460) {
 		water_sensor->from = 4.0;
 		water_sensor->to = 5.0;
 	}
@@ -499,20 +404,7 @@ void temp_sensor_active() {
 	temp_sensor->temp_data = temp;
 	temp_sensor->hum_data = hum;
 	
-//	printf("T: %u °C\n", (uint32_t) temp);
-//	printf("H: %u %%\n", (uint32_t) hum);
-	
 	_delay_ms(500);
-	
-	/*
-	dtostrf(temp, 4, 2, res1);
-	dtostrf(hum, 4, 2, res2);
-	strcpy(str, "Temp: ");
-	strcat(str, res1);
-	strcat(str, " °C; Um: ");
-	strcat(str, res2);
-	strcat(str, " %");
-	*/
 }
 
 // ==============================================================
@@ -525,7 +417,7 @@ void sensor_init() {
 }
 
 ISR(USART_RX_vect) {
-	printf("Mode [p, w, r, e]: ");
+	printf("Comando [p, w, r, e]: ");
 	char mode = UART_receive(&INFP);
 	printf("%c\n", mode);
 	
@@ -550,7 +442,7 @@ ISR(USART_RX_vect) {
 		
 		case 'W':
 		case 'w':
-			printf("Store results in EEPROM\n");
+			printf("Scrittura dei risultati nella EEPROM\n");
 			
 			log_struct->write_count++;
 			printf("write_count: %d\n", log_struct->write_count);
@@ -563,13 +455,13 @@ ISR(USART_RX_vect) {
 			EEPROM_write(buffer->data, 1, len);
 			
 			eeprom_empty = 0;
-			printf("EEPROM written\n");
+			printf("EEPROM aggiornata\n");
 			break;
 
 		case 'R':
 		case 'r':
 			if(eeprom_empty) {
-				printf("EEPROM empty!\n");
+				printf("EEPROM vuota!\n");
 				break;
 			}
 			
@@ -579,7 +471,7 @@ ISR(USART_RX_vect) {
 			EEPROM_read_int(&len, 0);
 			EEPROM_read(str, 1, len);
 			
-			printf("Contents of string in EEPROM:\n");
+			printf("Contenuto della EEPROM:\n");
 			printf("%s", str);
 			break;
 		
@@ -591,11 +483,11 @@ ISR(USART_RX_vect) {
 			log_struct->read_count = 0;
 			log_struct->write_count = 0;
 			
-			printf("EEPROM erased\n");
+			printf("EEPROM svuotata\n");
 			break;
 		
 		default:
-			printf("Invalid operation!\n");
+			printf("Operazione non valida!\n");
 			break;
 	}
 	
@@ -604,11 +496,11 @@ ISR(USART_RX_vect) {
 }
 
 int main() {
-	dist_sensor  = (DistSensor*)  malloc(sizeof(DistSensor));
+	dist_sensor = (DistSensor*) malloc(sizeof(DistSensor));
 	water_sensor = (WaterSensor*) malloc(sizeof(WaterSensor));
-	temp_sensor  = (TempSensor*)  malloc(sizeof(TempSensor));
-	log_struct   = (LogStruct*)   malloc(sizeof(LogStruct));
-	buffer		 = (Buffer*)	  malloc(sizeof(Buffer));
+	temp_sensor = (TempSensor*) malloc(sizeof(TempSensor));
+	log_struct = (LogStruct*) malloc(sizeof(LogStruct));
+	buffer = (Buffer*) malloc(sizeof(Buffer));
 	
 	UART_init();
 	stdout = &OUTFP;
