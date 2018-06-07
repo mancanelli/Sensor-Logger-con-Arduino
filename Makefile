@@ -9,25 +9,25 @@ protocol = arduino
 part = ATMEGA328P
 
 
-$(prog).hex $(prog).bin $(prog).lst : $(prog)
-	avr-objcopy -O ihex -R .eeprom $< $(prog).hex
-	avr-objcopy -O binary -R .eeprom $< $(prog).bin
-	avr-objdump -d $< >$(prog).lst
+logger.hex logger.bin logger.lst : logger
+	avr-objcopy -O ihex -R .eeprom $< logger.hex
+	avr-objcopy -O binary -R .eeprom $< logger.bin
+	avr-objdump -d $< >logger.lst
 
-$(prog) : $(prog).o
+logger : logger.o
 	$(CC) $(mcu) $< -o $@
 
-$(prog).o : $(prog).c
+logger.o : logger.c logger.h
 	$(CC) -Os $(freq) $(mcu) -c $<
 
 
 .PHONY : clean upload download
 
 clean:
-	rm -f $(prog) $(addprefix $(prog), .o .hex .bin .lst)
+	rm -f logger $(addprefix logger, .o .hex .bin .lst)
 
 upload:
-	avrdude $(AVRDUDE_FLAGS) -U flash:w:$(prog).hex
+	avrdude $(AVRDUDE_FLAGS) -U flash:w:logger.hex
 
 download:
-	avrdude $(AVRDUDE_FLAGS) -U flash:r:$(prog)_backup.hex:i
+	avrdude $(AVRDUDE_FLAGS) -U flash:r:logger_backup.hex:i
