@@ -11,6 +11,10 @@
 #define HIGH 0x1
 #define LOW  0x0
 
+// ==============================================================
+// ========================= STRUCT =============================
+// ==============================================================
+
 typedef enum {
 	GetDist = 0x1,
 	GetWater = 0x2,
@@ -63,6 +67,10 @@ typedef struct Buffer {
     int size;
 } Buffer;
 
+// ==============================================================
+// ========================== FUNC ==============================
+// ==============================================================
+
 void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor* temp_sensor, LogStruct* log_struct, Buffer* buffer);
 void reset_buffer(Buffer* b);
 void reserve_space(Buffer* buffer, int bytes);
@@ -91,5 +99,8 @@ void analog_sensor_active();
 
 void temp_request();
 void temp_response();
-uint8_t temp_data();
+float temp_data();
 void temp_sensor_active();
+
+void sensor_init();
+void delay_ms(int ms);

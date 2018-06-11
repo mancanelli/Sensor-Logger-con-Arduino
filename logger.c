@@ -36,7 +36,7 @@ void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor*
 	
 	dist_sensor->echo_bit = PORTB4;
 	dist_sensor->trig_bit = PORTB3;
-	water_sensor->analog_bit = 0;
+	water_sensor->analog_bit = PORTC0;
 	temp_sensor->digital_bit = PORTD6;
 	
 	log_struct->ds = dist_sensor;
@@ -53,7 +53,7 @@ void struct_init(DistSensor* dist_sensor, WaterSensor* water_sensor, TempSensor*
 }
 
 void reset_buffer(Buffer* b) {
-	memset(((char*) buffer->data), 0, strlen(buffer->data)+1);
+	memset(((char*) b->data), 0, strlen(b->data) + 1);
 	buffer->next = 0;
 }
 
@@ -145,10 +145,10 @@ void packet_serialize(LogStruct* ls, Buffer* b) {
 }
 
 // ==============================================================
-// ========================== UART ==============================
+// ========================== USART ==============================
 // ==============================================================
 
-void UART_init() {
+void USART_init() {
 	UBRR0H = (UBRR0_SET >> 8);
 	UBRR0L = UBRR0_SET;
 	
@@ -158,21 +158,21 @@ void UART_init() {
 	UCSR0C |= bit_value(UCSZ00) | bit_value(UCSZ01) | bit_value(USBS0);
 }
 
-static int UART_receive(FILE *f) {
+static int USART_receive(FILE *f) {
 	loop_until_bit_is_set(UCSR0A, RXC0);
 	while(!(UCSR0A & bit_value(UDRE0)));
 	return UDR0;
 }
 
-static int UART_send(char c, FILE *f) {
-	if(c == '\n') UART_send('\r', f);
+static int USART_send(char c, FILE *f) {
+	if(c == '\n') USART_send('\r', f);
 	while(!(UCSR0A & bit_value(UDRE0)));
 	UDR0 = c;
 	return 0;
 }
 
-static FILE OUTFP = FDEV_SETUP_STREAM(UART_send, NULL, _FDEV_SETUP_WRITE);
-static FILE INFP  = FDEV_SETUP_STREAM(NULL, UART_receive, _FDEV_SETUP_READ);
+static FILE OUTFP = FDEV_SETUP_STREAM(USART_send, NULL, _FDEV_SETUP_WRITE);
+static FILE INFP  = FDEV_SETUP_STREAM(NULL, USART_receive, _FDEV_SETUP_READ);
 
 // ==============================================================
 // ========================= EEPROM =============================
@@ -227,9 +227,8 @@ void EEPROM_init() {
 	
 	printf("Controllo del contenuto della EEPROM...\n");
 	EEPROM_read_int(&data, 0);
-	int eeprom_empty = !data;
 	
-	if(eeprom_empty)
+	if(!data)
 		printf("EEPROM vuota\n");
 }
 
@@ -275,8 +274,6 @@ int pulseIn(uint8_t state, int timeout) {
 }
 
 void dist_sensor_active() {
-	char res[16];
-
 	begin_trig();
 	
 	int duration = pulseIn(HIGH, 10000);
@@ -302,7 +299,6 @@ void analog_init() {
 }
 
 void analog_sensor_init() {
-	analog_init();
 	DDRC  &= ~bit_value(water_sensor->analog_bit);
 	PORTC &= ~bit_value(water_sensor->analog_bit);
 	DIDR0 |= bit_value(water_sensor->analog_bit);
@@ -322,6 +318,7 @@ uint16_t analog_read() {
 
 void analog_sensor_active() {
 	uint16_t val = analog_read();
+	
 	if(0 <= val && val < 130) {
 		water_sensor->from = 0.0;
 		water_sensor->to = 0.5;
@@ -366,40 +363,37 @@ void temp_response() {
 	uint8_t bit = bit_value(temp_sensor->digital_bit);
 	DDRD &= ~bit;
 	
-	while (PIND & bit);
-	while (!(PIND & bit));
-	while (PIND & bit);
+	while(PIND & bit);
+	while(!(PIND & bit));
+	while(PIND & bit);
 }
 
-uint8_t temp_data() {
+float temp_data() {
 	uint8_t bit = bit_value(temp_sensor->digital_bit);
 	uint8_t c = 0;
 	
 	for(int i = 0; i < 8; i++) {
-		while (!(PIND & bit));
+		while(!(PIND & bit));
 		_delay_us(30);
 		
 		if(PIND & bit) c = (c << 1) | HIGH;
 		else c = (c << 1);
 		
-		while (PIND & bit);
+		while(PIND & bit);
 	}
 	
 	return c;
 }
 
 void temp_sensor_active() {
-	char res1[16];
-	char res2[16];
+	float hum, temp, checksum;
 	
-	float hum = 52.71, temp = 25.64, checksum;
-
 	temp_request();
 	temp_response();
-
-	hum = ((float) temp_data()) + ((float) (temp_data() / 100));
-	temp = ((float) temp_data()) + ((float) (temp_data() / 100));
-	checksum = (float) temp_data();
+	
+	hum = temp_data() + temp_data() / 100;
+	temp = temp_data() + temp_data() / 100;
+	checksum = temp_data();
 	
 	temp_sensor->temp_data = temp;
 	temp_sensor->hum_data = hum;
@@ -413,12 +407,18 @@ void temp_sensor_active() {
 
 void sensor_init() {
 	dist_sensor_init();
+	analog_init();
 	analog_sensor_init();
+}
+
+void delay_ms(int ms) {
+	for(int i = 0; i < ms; i++)
+		_delay_ms(1);
 }
 
 ISR(USART_RX_vect) {
 	printf("Comando [p, w, r, e]: ");
-	char mode = UART_receive(&INFP);
+	char mode = USART_receive(&INFP);
 	printf("%c\n", mode);
 	
 	cli();
@@ -502,7 +502,7 @@ int main() {
 	log_struct = (LogStruct*) malloc(sizeof(LogStruct));
 	buffer = (Buffer*) malloc(sizeof(Buffer));
 	
-	UART_init();
+	USART_init();
 	stdout = &OUTFP;
 	stdin  = &INFP;
 	
@@ -511,12 +511,20 @@ int main() {
 	
 	struct_init(dist_sensor, water_sensor, temp_sensor, log_struct, buffer);
 	
+	printf("Inserire il periodo di acquisizione dei dati: ");
+	int periodo;
+	scanf("%d", &periodo);
+	printf("%d\n", periodo);
+	
+	printf("Inizio delle attività\n");
+	printf("----------------------------\n");
+	
 	sei();
 	
 	while(1) {
 		dist_sensor_active();
 		analog_sensor_active();
 		temp_sensor_active();
-		_delay_ms(1000);
+		delay_ms(periodo);
 	}
 }
